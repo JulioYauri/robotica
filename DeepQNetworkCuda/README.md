@@ -13,7 +13,13 @@ Se implementa una **Deep Q-Network (DQN)** acelerada con **CUDA**, entrenando un
 ---
 ## Entrenamiento
 
+Primeras épocas
+
 ![Épocas 7-15](./assets/epocas1.gif)
 ![Épocas 30-37](./assets/epocas2.gif)
+
+
+Meta alcanzada en la época 44
+
 ![Épocas 39-44 Meta alcanzada](./assets/epocas3.gif)
 
