@@ -4,13 +4,12 @@ import torch.optim as optim
 import numpy as np
 import random
 from collections import deque
-from controller import Supervisor  # Usar Supervisor en lugar de Robot
+from controller import Supervisor  
 
-# Verificar disponibilidad de CUDA
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Usando dispositivo: {device}")
 
-# Red neuronal DQN
+# red neuronal DQN
 class DQN(nn.Module):
     def __init__(self, input_size, output_size):
         super(DQN, self).__init__()
@@ -25,7 +24,6 @@ class DQN(nn.Module):
         x = torch.relu(self.fc3(x))
         return self.fc4(x)
 
-# Replay Buffer
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
@@ -42,31 +40,29 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-# Agente DQN
+
 class DQNAgent:
     def __init__(self, state_size, action_size):
         self.state_size = state_size
         self.action_size = action_size
         
-        # Hiperparámetros
-        self.gamma = 0.99  # Factor de descuento
-        self.epsilon = 1.0  # Exploración inicial
+        # parametros
+        self.gamma = 0.99 
+        self.epsilon = 1.0  
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
         self.learning_rate = 0.001
         self.batch_size = 64
         self.target_update = 100
         
-        # Redes
+        # redes
         self.policy_net = DQN(state_size, action_size).to(device)
         self.target_net = DQN(state_size, action_size).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         
-        # Optimizador
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
         self.criterion = nn.MSELoss()
         
-        # Replay buffer
         self.memory = ReplayBuffer(10000)
         
         self.steps_done = 0
@@ -117,29 +113,25 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-# Entorno de Webots
 class WebotsEnv:
     def __init__(self, supervisor):
         self.supervisor = supervisor
         self.timestep = int(supervisor.getBasicTimeStep())
         
-        # Obtener el nodo del robot
+        # nodo del robot
         self.robot_node = supervisor.getFromDef("ROBOT")
         if self.robot_node is None:
             print("ERROR: No se encontró el robot con DEF 'ROBOT'")
             print("Asegúrate de que tu robot tenga DEF 'ROBOT' en el archivo .wbt")
-            # Intentar obtener el nodo del robot por su propio nombre
             self.robot_node = supervisor.getSelf()
             if self.robot_node is None:
                 raise Exception("No se pudo obtener el nodo del robot")
             else:
                 print("Usando getSelf() como alternativa")
         
-        # Guardar posición y rotación inicial
         self.initial_translation = self.robot_node.getField("translation").getSFVec3f()
         self.initial_rotation = self.robot_node.getField("rotation").getSFRotation()
         
-        # Dispositivos
         self.lidar = supervisor.getDevice('lidar')
         self.lidar.enable(self.timestep)
         
@@ -149,36 +141,27 @@ class WebotsEnv:
         self.compass = supervisor.getDevice('compass')
         self.compass.enable(self.timestep)
         
-        # Motores
         self.left_motor = supervisor.getDevice('left wheel')
         self.right_motor = supervisor.getDevice('right wheel')
         self.left_motor.setPosition(float('inf'))
         self.right_motor.setPosition(float('inf'))
         
-        # Posición de la meta (ajustar según tu escenario)
-        self.goal_position = np.array([5.0, 5.0])  # [X, Y]
+        self.goal_position = np.array([1.4, 1.3])  # [X, Y]
         
-        # Velocidades
-        self.max_speed = 4.0  # Mayor velocidad para avanzar más rápido
-        
-        # Acciones: 0=adelante, 1=izquierda, 2=derecha, 3=atrás
+        self.max_speed = 4.0 
         self.action_space = 4
-        
-        # Variables de estado
         self.previous_distance = None
         self.steps_without_progress = 0
         
-        # Esperar inicialización
+        # inicialización
         for _ in range(10):
             supervisor.step(self.timestep)
     
     def get_state(self):
-        # Obtener datos del LIDAR (simplificados)
         ranges = self.lidar.getRangeImage()
         if not ranges:
             lidar_data = np.zeros(8)
         else:
-            # Reducir a 8 sectores
             num_sectors = 8
             sector_size = len(ranges) // num_sectors
             lidar_data = []
@@ -186,66 +169,58 @@ class WebotsEnv:
                 start = i * sector_size
                 end = start + sector_size
                 min_dist = min(ranges[start:end])
-                lidar_data.append(min(min_dist, 5.0) / 5.0)  # Normalizar
+                lidar_data.append(min(min_dist, 5.0) / 5.0)  
             lidar_data = np.array(lidar_data)
         
-        # Posición actual (X, Y en el plano horizontal)
         pos = self.gps.getValues()
-        current_pos = np.array([pos[0], pos[1]])  # X, Y (Z es altura, se ignora)
+        current_pos = np.array([pos[0], pos[1]])  
         
-        # Distancia y ángulo a la meta
+        # distancia y ángulo a la meta
         diff = self.goal_position - current_pos
         distance = np.linalg.norm(diff)
         angle = np.arctan2(diff[1], diff[0])
         
-        # Orientación del robot
         north = self.compass.getValues()
         heading = np.arctan2(north[0], north[1])
         
-        # Ángulo relativo a la meta
         relative_angle = angle - heading
         relative_angle = np.arctan2(np.sin(relative_angle), np.cos(relative_angle))
         
-        # Estado: [8 lecturas LIDAR, distancia normalizada, ángulo relativo]
         state = np.concatenate([
             lidar_data,
-            [distance / 10.0],  # Normalizar distancia
-            [relative_angle / np.pi]  # Normalizar ángulo
+            [distance / 10.0],  
+            [relative_angle / np.pi] 
         ])
         
         return state, distance, current_pos
     
     def step(self, action):
-        # Ejecutar acción
-        if action == 0:  # Adelante
+        # acciones
+        if action == 0:  # adelante
             self.left_motor.setVelocity(self.max_speed)
             self.right_motor.setVelocity(self.max_speed)
-        elif action == 1:  # Izquierda
+        elif action == 1:  # izquierda
             self.left_motor.setVelocity(self.max_speed * 0.3)
             self.right_motor.setVelocity(self.max_speed)
-        elif action == 2:  # Derecha
+        elif action == 2:  # derecha
             self.left_motor.setVelocity(self.max_speed)
             self.right_motor.setVelocity(self.max_speed * 0.3)
-        elif action == 3:  # Atrás
+        elif action == 3:  # atrás
             self.left_motor.setVelocity(-self.max_speed * 0.5)
             self.right_motor.setVelocity(-self.max_speed * 0.5)
         
-        # Avanzar simulación
         self.supervisor.step(self.timestep)
         
-        # Obtener nuevo estado
         next_state, distance, current_pos = self.get_state()
-        
-        # Calcular recompensa
         reward = 0
         done = False
         
-        # Recompensa por progreso hacia la meta
+        # recompensa por avanzar hacia la meta
         if self.previous_distance is not None:
             progress = self.previous_distance - distance
-            reward += progress * 20  # Recompensa proporcional al progreso
+            reward += progress * 20 
             
-            if abs(progress) < 0.005:  # Sin progreso significativo (umbral más bajo)
+            if abs(progress) < 0.005: 
                 self.steps_without_progress += 1
             else:
                 self.steps_without_progress = 0
